@@ -14,6 +14,14 @@ import requests
 import re
 import time
 from pathlib import Path
+import pandas as pd
+import requests
+import re
+from bs4 import BeautifulSoup
+import json
+from typing import List, Dict, Union
+import io
+import tempfile
 
 app = Flask(__name__)
 
@@ -79,6 +87,187 @@ CORPORA = [
 COOKIES = {}
 
 
+
+def convert_for_hf(json_data, url):
+    phrases = []
+    for sentence_ix, sentence in enumerate(json_data):
+        wordforms = []
+        wf_analyses = []
+        for word in sentence:
+            possible_analyses = []
+            wordforms.append("#TBD")
+            for possible_analysis in word:
+                el = possible_analysis
+                if not el.get("glosses", False): continue;
+                wf_text = el.get("wordform", "").replace("-", "").replace("=", "")
+                morphs = el.get("wordform", "").replace("-", "@").replace("=", "@").split("@")
+                glosses = el.get("glosses", "").replace("-", "@").replace("=", "@").split("@")
+                grammar_tags = el.get("grammar_tags", [])
+                trans = el["translation"]
+                wf_item = dict(txt=wf_text, grammar_tags=grammar_tags, translation=trans)
+                morphs = [{"item": {"gls": gls, "id": str(ix), "txt": txt}}
+                        for ix, (gls, txt) in enumerate(zip(glosses, morphs))]
+                wf_pretty_di = {"item": wf_item, "morph": morphs}
+                wordforms[-1] = wf_text
+                possible_analyses.append(wf_pretty_di)
+            wf_analyses.append(possible_analyses)
+        phrase_di = {
+            "item": {
+                "id": str(sentence_ix),
+                "ft": " ".join(wordforms),
+                "participant": "UNK",
+                "timestamp": ["UNK"],
+            },
+            "word": wf_analyses,
+        }
+        phrases.append(phrase_di)
+
+
+    dataset = {"item": {"source": f"${url}"},
+               "paragraph": [{"item": {"speaker": "UNK"}, "phrase": phrases}]}
+    return dataset
+
+
+def parse_tsa(url: str, cookie=None, HF_DATASET=None) -> None:
+    if HF_DATASET is None:
+        HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
+
+    # base url, not the main page
+    base_url = url.rsplit('/', maxsplit=1)[0]
+
+    if cookie is None:
+        # acquire cookies
+        session = requests.get(f'{base_url}/get_word_fields').cookies.get_dict()
+        # get the main page and the language name if specified
+        main_page = BeautifulSoup(requests.get(url).text)
+        lang = main_page.find('select', {'name': 'lang1'})
+
+        if lang:
+            lang = lang.find('option')['value']
+        else:
+            lang = ''
+        base = f'{base_url}/search_sent?' \
+            f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
+
+        name = main_page.find(id='corpus_title').text.strip()
+
+        # send request to the server with acquired cookies
+        html_1 = requests.get(base, cookies=session)
+    else: 
+        session = cookie
+        
+        # get the main page and the language name if specified
+        main_page = BeautifulSoup(requests.get(url).text)
+        lang = main_page.find('select', {'name': 'lang1'})
+
+        if lang:
+            lang = lang.find('option')['value']
+        else:
+            lang = ''
+        base = f'{base_url}/search_sent?' \
+            f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
+
+        
+
+    # iterate through pages
+    page = 1
+    sentences = []
+    while True:
+        # parse only the first page and see the results
+        # if OLEG_IMPATIENT and page > 1: break
+        if page % 10 == 0:
+            print(page, end=' ')
+        base = f'{base_url}/search_sent/{page}' # per-page search
+        html = requests.get(base, cookies=session)
+        soup = BeautifulSoup(html.text)
+        # get all sentences
+        contexts = soup.find_all('span', {'class': 'sentence'})
+        if not contexts:
+            break
+
+        for context in contexts:
+            sentence = []
+            # find sent_lang tag -- specific for every TSA but always starts
+            # with sent_lang
+            lang_class = re.search('"(sent_lang.*?)"', str(context)).groups(1)
+            words = context.find('span', {'class': lang_class})
+            words = words.find_all('span', {'class': 'word'})
+
+            for word in words:
+                # all the annotation is hidden inside `data-ana`
+                annotation = BeautifulSoup(word['data-ana'])
+                variants = []
+                if not annotation.find_all('div', {'class': 'popup_ana'}):
+                    variants.append(
+                        {
+                            'wordform': word.text,
+                            'glosses': '',
+                            'grammar_tags': [],
+                            'translation': ''
+                        }
+                    )
+                    sentence.append(variants)
+                    continue
+                for ana in annotation.find_all('div', {'class': 'popup_ana'}):
+                    # sometimes data are in `class` and sometimes in `span`
+
+                    wf = ana.find_all('div', {'class': 'popup_gloss'})
+
+                    if not wf:
+                        wf = ana.find_all('span', {'class': 'popup_gloss'})
+
+                    grammar = ana.find('div', {'class': 'popup_gramm'})
+
+                    trans_langs = re.findall('(popup_field_trans.*?)\W',
+                                             str(ana))
+                    translations = []
+
+                    for lang in trans_langs:
+                        translations.append(
+                            ana.find('div', {'class': lang})
+                        )
+
+                    if translations:
+                        translations = [x.find(
+                            'span', {'class': 'popup_value'}
+                        ).text for x in translations]
+                    else:
+                        translations = []
+
+                    if grammar:
+                        grammar = grammar.find(
+                            'span', {'class': 'popup_value'}
+                        ).text.split(', ')
+                    else:
+                        grammar = []
+
+                    if wf:
+                        wf = [x.text for x in wf]
+                        if len(wf) == 1:
+                            wf.append('')
+                    else:
+                        wf = [word.text, '']
+
+                    variants.append(
+                        {
+                            'wordform': wf[0],
+                            'glosses': wf[1],
+                            'grammar_tags': grammar,
+                            'translation': translations
+                        }
+                    )
+                sentence.append(variants)
+            sentences.append(sentence)
+        page += 1
+
+
+    hf_ver = convert_for_hf(sentences, url)
+    HF_DATASET["all"][0]["interlinear-text"].append(hf_ver)
+
+    return sentences, HF_DATASET
+
+
+
 @app.route("/")
 def main_page():
     """
@@ -114,6 +303,25 @@ def empty():
     empty function just to get the id
     """
     return ""
+
+@app.route("/download_results")
+def download_results():    
+    langs_corp = request.args.getlist("languages")
+
+    if not langs_corp:
+        langs_corp = [x[0] for x in CORPORA]
+
+    bases = [f"{x[1]}search_sent?" for x in CORPORA if x[0] in langs_corp]
+    sessions = request.cookies
+
+    HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
+    for i, base in enumerate(bases):
+        curr_cookie = {COOKIES[langs_corp[i]]: sessions[f"{COOKIES[langs_corp[i]]}_{langs_corp[i]}"]}        
+        _, HF_DATASET = parse_tsa(base, curr_cookie, HF_DATASET=HF_DATASET)
+    tfile = tempfile.TemporaryFile()
+    tfile.write(json.dumps(HF_DATASET).encode())
+    tfile.seek(0)
+    return send_file(tfile, as_attachment=True, mimetype="application/json", download_name="results.json")
 
 
 @app.route("/search_sent")
@@ -172,8 +380,8 @@ def search():
     active_langs = "$@".join(langs_corp)
     active_langs = f'<div id="active_langs" style="display: none;">active_langs={active_langs}</div>'
 
-    return active_langs + active + header + "".join(body)
-
+    download_link = f'<a href="/download_results?{query}">Download results</a>'
+    return active_langs + active + download_link + header + "".join(body)
 
 @app.route("/search_sent/<page>")
 def pagination(page):
