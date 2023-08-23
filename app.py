@@ -83,6 +83,15 @@ CORPORA = [
     ["brt", "http://buryat.web-corpora.net/buryat_corpus/", "Buryat"],
     ["wct", "https://linghub.ru/wc_corpus/", "WC corpus"],
 ]
+CORPORA_di = {k: {'link': v, 'title': vv} for k, v, vv in CORPORA}
+
+corr = {'neo': 'urmi', 'dgr': 'ossetic_digor', 
+        'iro': 'ossetic_iron', 'mmr': 'meadow_mari', 
+        'mmm': 'meadow_mari', 'umm': 'udmurt', 
+        'wct': 'russian'}
+
+def get_lang1(langcode):
+    return corr.get(langcode, CORPORA_di.get(langcode, {}).get('title', '').lower())
 
 COOKIES = {}
 
@@ -128,7 +137,7 @@ def convert_for_hf(json_data, url):
     return dataset
 
 
-def parse_tsa(url: str, cookie=None, HF_DATASET=None) -> None:
+def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
     if HF_DATASET is None:
         HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
 
@@ -146,6 +155,8 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None) -> None:
             lang = lang.find('option')['value']
         else:
             lang = ''
+        lang1_ = get_lang1(langcode)
+        if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
             f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
 
@@ -164,6 +175,8 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None) -> None:
             lang = lang.find('option')['value']
         else:
             lang = ''
+        lang1_ = get_lang1(langcode)
+        if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
             f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
 
@@ -316,8 +329,9 @@ def download_results():
 
     HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
     for i, base in enumerate(bases):
-        curr_cookie = {COOKIES[langs_corp[i]]: sessions[f"{COOKIES[langs_corp[i]]}_{langs_corp[i]}"]}        
-        _, HF_DATASET = parse_tsa(base, curr_cookie, HF_DATASET=HF_DATASET)
+        langcode = langs_corp[i]
+        curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
+        _, HF_DATASET = parse_tsa(base, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
     tfile = tempfile.TemporaryFile()
     tfile.write(json.dumps(HF_DATASET).encode())
     tfile.seek(0)
@@ -326,6 +340,7 @@ def download_results():
 
 @app.route("/search_sent")
 def search():
+    print(f"before search_sent")
     langs_corp = request.args.getlist("languages")
 
     # if no languages selected, we think that all languages are selected
@@ -333,7 +348,7 @@ def search():
         langs_corp = [x[0] for x in CORPORA]
 
     # building a query
-    bases = [f"{x[1]}search_sent?" for x in CORPORA if x[0] in langs_corp]
+    bases = [(x[0], f"{x[1]}search_sent?") for x in CORPORA if x[0] in langs_corp]
     query = request.url.split("search_sent?", maxsplit=1)[1]
     sessions = request.cookies
 
@@ -348,12 +363,14 @@ def search():
 
     # stealing the data from a tsa-korpus
     body = []
-    for i, base in enumerate(bases):
+    for i, (lang, base) in enumerate(bases):
         subbody = re.sub(
             r'data-page="(\d+)"',
             f'data-page="{langs_corp[i]}_\g<1>"',
+            url = base + f"lang1={lang}&"+ query
+            print(f"getting {url=}")
             requests.get(
-                base + query,
+                url,
                 cookies={
                     COOKIES[langs_corp[i]]: sessions[
                         f"{COOKIES[langs_corp[i]]}_{langs_corp[i]}"
@@ -388,6 +405,8 @@ def pagination(page):
     """
     another function for stealing
     """
+    print(f"before search_sent/page")
+
     lang, page = page.split("_")
     corpus = [x for x in CORPORA if x[0] == lang][0]
     base = corpus[1] + "search_sent/"
