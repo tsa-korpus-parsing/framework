@@ -364,11 +364,12 @@ def search():
     # stealing the data from a tsa-korpus
     body = []
     for i, (lang, base) in enumerate(bases):
+        url = base + f"lang1={get_lang1(lang)}&"+ query
+        print(f"getting url={url}")
+            
         subbody = re.sub(
             r'data-page="(\d+)"',
             f'data-page="{langs_corp[i]}_\g<1>"',
-            url = base + f"lang1={lang}&"+ query
-            print(f"getting {url=}")
             requests.get(
                 url,
                 cookies={
