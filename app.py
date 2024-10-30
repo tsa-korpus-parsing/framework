@@ -18,6 +18,7 @@ from typing import List, Dict, Union
 import tempfile
 from datasets import Dataset, DatasetDict
 from huggingface_hub import HfApi
+from itertools import zip_longest
 
 app = Flask(__name__)
 
@@ -103,17 +104,24 @@ def convert_for_hf(json_data, url):
             possible_analyses = []
             for possible_analysis in word:
                 el = possible_analysis
+                if not el.get("glosses", False):
+                    print(el)
+                    # continue
                 wf_text = el.get("wordform", "").replace("-", "").replace("=", "")
                 morphs = el.get("wordform", "").replace("-", "@").replace("=", "@").split("@")
                 glosses = el.get("glosses", "").replace("-", "@").replace("=", "@").split("@")
+
                 grammar_tags = el.get("grammar_tags", [])
                 trans = el["translation"]
+                if trans == "":
+                    trans = [""]
                 wf_item = dict(txt=wf_text, grammar_tags=grammar_tags, translation=trans)
                 morphs = [{"item": {"gls": gls, "id": str(ix), "txt": txt}}
-                        for ix, (gls, txt) in enumerate(zip(glosses, morphs))]
+                        for ix, (gls, txt) in enumerate(zip_longest(glosses, morphs, fillvalue=""))]
                 wf_pretty_di = {"item": wf_item, "morph": morphs}
                 wordforms.append(wf_text)
                 possible_analyses.append(wf_pretty_di)
+                
             wf_analyses.append(possible_analyses)
         phrase_di = {
             "item": {
@@ -186,8 +194,6 @@ def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> N
         if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
             f'{str(query)}&lang1={lang}'
-
-    print(base)    
 
     # iterate through pages
     page = 1
@@ -337,7 +343,6 @@ def download_results():
 
     HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
     query = request.query_string
-    print(query)
     for i, base in enumerate(bases):
         langcode = langs_corp[i]
         curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
@@ -361,7 +366,6 @@ def ask_for_credentials():
 
     HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
     query = request.query_string
-    print(query)
     for i, base in enumerate(bases):
         langcode = langs_corp[i]
         curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
