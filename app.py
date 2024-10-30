@@ -1,18 +1,13 @@
-from email import header
-from http import cookies
 from flask import (
     Flask,
     render_template,
     request,
-    redirect,
-    url_for,
     send_file,
     make_response,
 )
 import pandas as pd
 import requests
 import re
-import time
 from pathlib import Path
 import pandas as pd
 import requests
@@ -20,8 +15,9 @@ import re
 from bs4 import BeautifulSoup
 import json
 from typing import List, Dict, Union
-import io
 import tempfile
+from datasets import Dataset, DatasetDict
+from huggingface_hub import HfApi
 
 app = Flask(__name__)
 
@@ -83,6 +79,7 @@ CORPORA = [
     ["brt", "http://buryat.web-corpora.net/buryat_corpus/", "Buryat"],
     ["wct", "https://linghub.ru/wc_corpus/", "WC corpus"],
 ]
+
 CORPORA_di = {k: {'link': v, 'title': vv} for k, v, vv in CORPORA}
 
 corr = {'neo': 'urmi', 'dgr': 'ossetic_digor', 
@@ -104,10 +101,8 @@ def convert_for_hf(json_data, url):
         wf_analyses = []
         for word in sentence:
             possible_analyses = []
-            wordforms.append("#TBD")
             for possible_analysis in word:
                 el = possible_analysis
-                if not el.get("glosses", False): continue;
                 wf_text = el.get("wordform", "").replace("-", "").replace("=", "")
                 morphs = el.get("wordform", "").replace("-", "@").replace("=", "@").split("@")
                 glosses = el.get("glosses", "").replace("-", "@").replace("=", "@").split("@")
@@ -117,7 +112,7 @@ def convert_for_hf(json_data, url):
                 morphs = [{"item": {"gls": gls, "id": str(ix), "txt": txt}}
                         for ix, (gls, txt) in enumerate(zip(glosses, morphs))]
                 wf_pretty_di = {"item": wf_item, "morph": morphs}
-                wordforms[-1] = wf_text
+                wordforms.append(wf_text)
                 possible_analyses.append(wf_pretty_di)
             wf_analyses.append(possible_analyses)
         phrase_di = {
@@ -137,7 +132,19 @@ def convert_for_hf(json_data, url):
     return dataset
 
 
-def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
+def upload_dataset_to_huggingface(data, dataset_name, username, token):
+
+    # Convert the data to Hugging Face's Dataset format
+    dataset = Dataset.from_dict(data)
+
+    # Define the dataset dictionary (train, validation, test split if needed)
+    dataset_dict = DatasetDict({"train": dataset})
+    
+    # Push the dataset to the Hugging Face Hub
+    dataset_dict.push_to_hub(f"{username}/{dataset_name}", token=token)
+
+
+def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> None:
     if HF_DATASET is None:
         HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
 
@@ -158,7 +165,7 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
         lang1_ = get_lang1(langcode)
         if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
-            f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
+            f'{str(query)}&lang1={lang}'
 
         name = main_page.find(id='corpus_title').text.strip()
 
@@ -178,9 +185,9 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
         lang1_ = get_lang1(langcode)
         if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
-            f'n_words=1&random_seed=124255&lang1={lang}&page_size=100'
+            f'{str(query)}&lang1={lang}'
 
-        
+    print(base)    
 
     # iterate through pages
     page = 1
@@ -231,7 +238,7 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
 
                     grammar = ana.find('div', {'class': 'popup_gramm'})
 
-                    trans_langs = re.findall('(popup_field_trans.*?)\W',
+                    trans_langs = re.findall(r'(popup_field_trans.*?)\W',
                                              str(ana))
                     translations = []
 
@@ -278,6 +285,7 @@ def parse_tsa(url: str, cookie=None, HF_DATASET=None, langcode=None) -> None:
     HF_DATASET["all"][0]["interlinear-text"].append(hf_ver)
 
     return sentences, HF_DATASET
+
 
 
 
@@ -328,14 +336,57 @@ def download_results():
     sessions = request.cookies
 
     HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
+    query = request.query_string
+    print(query)
     for i, base in enumerate(bases):
         langcode = langs_corp[i]
         curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
-        _, HF_DATASET = parse_tsa(base, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
+        _, HF_DATASET = parse_tsa(base, query, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
+    
     tfile = tempfile.TemporaryFile()
-    tfile.write(json.dumps(HF_DATASET).encode())
+    tfile.write(json.dumps(HF_DATASET, ensure_ascii=False, indent=2).encode())
     tfile.seek(0)
     return send_file(tfile, as_attachment=True, mimetype="application/json", download_name="results.json")
+
+
+@app.route("/credentials")
+def ask_for_credentials():
+    langs_corp = request.args.getlist("languages")
+
+    if not langs_corp:
+        langs_corp = [x[0] for x in CORPORA]
+
+    bases = [f"{x[1]}search_sent?" for x in CORPORA if x[0] in langs_corp]
+    sessions = request.cookies
+
+    HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
+    query = request.query_string
+    print(query)
+    for i, base in enumerate(bases):
+        langcode = langs_corp[i]
+        curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
+        _, HF_DATASET = parse_tsa(base, query, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
+
+    
+    with open('file.json', 'w', encoding='utf8') as f:
+        json.dump(HF_DATASET, f, ensure_ascii=False, indent=2)
+    
+    return render_template("form.html")
+
+@app.route("/push_results", methods=['GET', 'POST'])
+def push_results():
+
+    with open('file.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    username = request.form['username']
+    token = request.form['token']
+    dataset_name = request.form['dataset_name']
+    # Perform the upload
+    upload_dataset_to_huggingface(data, dataset_name, username, token)
+
+    return "Dataset uploaded"
+    
 
 
 @app.route("/search_sent")
@@ -369,7 +420,7 @@ def search():
             
         subbody = re.sub(
             r'data-page="(\d+)"',
-            f'data-page="{langs_corp[i]}_\g<1>"',
+            fr'data-page="{langs_corp[i]}_\g<1>"',
             requests.get(
                 url,
                 cookies={
@@ -398,7 +449,7 @@ def search():
     active_langs = "$@".join(langs_corp)
     active_langs = f'<div id="active_langs" style="display: none;">active_langs={active_langs}</div>'
 
-    download_link = f'<a href="/download_results?{query}">Download results</a>'
+    download_link = f'<a href="/download_results?{query}">Download results</a> <a href="/credentials?{query}">Push results to HF</a>'
     return active_langs + active + download_link + header + "".join(body)
 
 @app.route("/search_sent/<page>")
@@ -415,7 +466,7 @@ def pagination(page):
 
     body = re.sub(
         r'data-page="(\d+)"',
-        f'data-page="{lang}_\g<1>"',
+        fr'data-page="{lang}_\g<1>"',
         requests.get(base + page, cookies={COOKIES[lang]: session}).text,
     )
     body = body.replace(

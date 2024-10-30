@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Upload Dataset to Hugging Face</title>
+  </head>
+  <body>
+    <h2>Upload Dataset to Hugging Face</h2>
+    <form action="/push_results" method="post">
+      <label for="username">Hugging Face Username:</label><br>
+      <input type="text" id="username" name="username" required><br><br>
+      <label for="token">Hugging Face Token:</label><br>
+      <input type="password" id="token" name="token" required><br><br>
+      <label for="dataset_name">Dataset Name:</label><br>
+      <input type="text" id="dataset_name" name="dataset_name" required><br><br>
+      <input type="submit" value="Upload Dataset">
+    </form>
+  </body>
+</html>
