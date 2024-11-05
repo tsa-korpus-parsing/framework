@@ -1,19 +1,74 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title>Upload Dataset to Hugging Face</title>
-  </head>
-  <body>
+<div id="dialog">
+  <div class="container" style="margin: auto;width: max-content;background-color: white; padding: 3em">
     <h2>Upload Dataset to Hugging Face</h2>
-    <form action="/push_results" method="post">
+    <form id="uploadForm">
       <label for="username">Hugging Face Username:</label><br>
       <input type="text" id="username" name="username" required><br><br>
       <label for="token">Hugging Face Token:</label><br>
       <input type="password" id="token" name="token" required><br><br>
       <label for="dataset_name">Dataset Name:</label><br>
       <input type="text" id="dataset_name" name="dataset_name" required><br><br>
-      <input type="submit" value="Upload Dataset">
+      <button type="button" onclick="submitForm()">Upload Dataset</button>
+      <span id="downloading" style="display: none;">Please, wait! Your dataset is being downloaded</span>
     </form>
-  </body>
-</html>
+  </div>
+</div>
+
+<style>
+  #dialog {
+    display: none; /* Hidden by default */
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+  }
+  a {
+    color: darkblue !important;
+    text-decoration: underline !important;
+  }
+  a:hover {
+    cursor: pointer !important;
+  }
+</style>
+
+<script>
+  // Function to show the modal
+  function showModal() {
+    document.getElementById("dialog").style.display = "block";
+  }
+
+  // Function to close the modal
+  function closeModal() {
+    document.getElementById("dialog").style.display = "none";
+  }
+
+  // Function to submit the form via AJAX
+  async function submitForm() {
+    const formData = new FormData(document.getElementById("uploadForm"));
+
+    document.getElementById("downloading").style.display = "block"
+    
+    try {
+      const response = await fetch("/push_results", {
+        method: "POST",
+        body: formData
+      });
+
+      if (response.ok) {
+        alert("Dataset uploaded successfully!");
+        closeModal();
+      } else {
+        alert("Failed to upload the dataset.");
+      }
+    } catch (error) {
+      console.error("Error:", error);
+      alert("An error occurred while uploading the dataset.");
+    }
+
+    document.getElementById("downloading").style.display = "none"
+  }
+</script>

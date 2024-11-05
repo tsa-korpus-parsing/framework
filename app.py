@@ -380,14 +380,26 @@ def ask_for_credentials():
 @app.route("/push_results", methods=['GET', 'POST'])
 def push_results():
 
-    with open('file.json', 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    langs_corp = request.args.getlist("languages")
+
+    if not langs_corp:
+        langs_corp = [x[0] for x in CORPORA]
+
+    bases = [f"{x[1]}search_sent?" for x in CORPORA if x[0] in langs_corp]
+    sessions = request.cookies
+
+    HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
+    query = request.query_string
+    for i, base in enumerate(bases):
+        langcode = langs_corp[i]
+        curr_cookie = {COOKIES[langcode]: sessions[f"{COOKIES[langcode]}_{langcode}"]}        
+        _, HF_DATASET = parse_tsa(base, query, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
 
     username = request.form['username']
     token = request.form['token']
     dataset_name = request.form['dataset_name']
     # Perform the upload
-    upload_dataset_to_huggingface(data, dataset_name, username, token)
+    upload_dataset_to_huggingface(HF_DATASET, dataset_name, username, token)
 
     return "Dataset uploaded"
     
@@ -453,8 +465,11 @@ def search():
     active_langs = "$@".join(langs_corp)
     active_langs = f'<div id="active_langs" style="display: none;">active_langs={active_langs}</div>'
 
-    download_link = f'<a href="/download_results?{query}">Download results</a> <a href="/credentials?{query}">Push results to HF</a>'
-    return active_langs + active + download_link + header + "".join(body)
+    download_link = f'<a href="/download_results?{query}">Download results</a> <a onclick=document.getElementById("dialog").style.display="block">Push results to HF</a>'
+    
+    with open('templates/form.html', encoding='utf8') as f:
+        modal = f.read()
+    return active_langs + active + download_link + header + "".join(body) + modal
 
 @app.route("/search_sent/<page>")
 def pagination(page):
