@@ -1,6 +1,10 @@
 <div id="dialog">
-  <div class="container" style="margin: auto;width: max-content;background-color: white; padding: 3em">
-    <h2>Upload Dataset to Hugging Face</h2>
+  <div class="container" style="margin: auto;width: max-content;background-color: white; padding: 3em; position: relative;">
+    
+    <h2>
+      <span id="closeButton" onclick="closeModal()" style="position: absolute; top: 0; right: 0.5em; font-size: 1.5em; cursor: pointer;">&times;</span>
+      Upload Dataset to Hugging Face
+    </h2>
     <form id="uploadForm">
       <label for="username">Hugging Face Username:</label><br>
       <input type="text" id="username" name="username" required><br><br>
