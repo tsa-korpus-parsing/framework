@@ -196,7 +196,7 @@ def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> N
         if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
             f'{str(query)}&lang1={lang}'
-        html_1 = requests.get(base, cookies=session)
+        # html_1 = requests.get(base, cookies=session)
 
     # iterate through pages
     page = 1
