@@ -24,6 +24,8 @@ from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 
+app.config['JSON_AS_ASCII'] = False
+
 
 # list of corpora with pseudo language codes and names for the menu
 CORPORA = [
@@ -107,8 +109,7 @@ def convert_for_hf(json_data, url):
             for possible_analysis in word:
                 el = possible_analysis
                 if not el.get("glosses", False):
-                    print(el)
-                    # continue
+                    pass
                 wf_text = el.get("wordform", "").replace("-", "").replace("=", "")
                 morphs = el.get("wordform", "").replace("-", "@").replace("=", "@").split("@")
                 glosses = el.get("glosses", "").replace("-", "@").replace("=", "@").split("@")
@@ -154,7 +155,7 @@ def upload_dataset_to_huggingface(data, dataset_name, username, token):
     dataset_dict.push_to_hub(f"{username}/{dataset_name}", token=token)
 
 
-def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> None:
+def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None, api=False) -> None:
     if HF_DATASET is None:
         HF_DATASET = {"all": [{"item": None, "interlinear-text": []}]}
 
@@ -180,7 +181,7 @@ def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> N
         name = main_page.find(id='corpus_title').text.strip()
 
         # send request to the server with acquired cookies
-        html_1 = requests.get(base, cookies=session)
+        # html_1 = requests.get(base, cookies=session)
     else: 
         session = cookie
         
@@ -196,7 +197,9 @@ def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> N
         if lang1_ : lang=lang1_
         base = f'{base_url}/search_sent?' \
             f'{str(query)}&lang1={lang}'
-        # html_1 = requests.get(base, cookies=session)
+        
+        if api:
+            html_1 = requests.get(base, cookies=session)
 
     # iterate through pages
     page = 1
@@ -204,8 +207,6 @@ def parse_tsa(url: str, query, cookie=None, HF_DATASET=None, langcode=None) -> N
     while True:
         # parse only the first page and see the results
         # if OLEG_IMPATIENT and page > 1: break
-        if page % 10 == 0:
-            print(page, end=' ')
         base = f'{base_url}/search_sent/{page}' # per-page search
         html = requests.get(base, cookies=session)
         soup = BeautifulSoup(html.text)
@@ -377,7 +378,7 @@ def evaluate():
     for i, base in enumerate(bases):
         langcode = langs_corp[i]
         curr_cookie = sessions[langcode]
-        _, HF_DATASET = parse_tsa(base, query, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode)
+        _, HF_DATASET = parse_tsa(base, query[14:-1], curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode, api=True)
     
     return jsonify({"train": HF_DATASET})
 
@@ -435,7 +436,6 @@ def push_results():
 
 @app.route("/search_sent")
 def search():
-    print(f"before search_sent")
     langs_corp = request.args.getlist("languages")
 
     # if no languages selected, we think that all languages are selected
@@ -460,7 +460,6 @@ def search():
     body = []
     for i, (lang, base) in enumerate(bases):
         url = base + f"lang1={get_lang1(lang)}&"+ query
-        print(f"getting url={url}")
             
         subbody = re.sub(
             r'data-page="(\d+)"',
@@ -504,7 +503,6 @@ def pagination(page):
     """
     another function for stealing
     """
-    print(f"before search_sent/page")
 
     lang, page = page.split("_")
     corpus = [x for x in CORPORA if x[0] == lang][0]
