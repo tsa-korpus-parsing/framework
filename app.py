@@ -378,7 +378,7 @@ def evaluate():
     for i, base in enumerate(bases):
         langcode = langs_corp[i]
         curr_cookie = sessions[langcode]
-        _, HF_DATASET = parse_tsa(base, query[14:-1], curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode, api=True)
+        _, HF_DATASET = parse_tsa(base, query, curr_cookie, HF_DATASET=HF_DATASET, langcode=langcode, api=True)
     
     return jsonify({"train": HF_DATASET})
 
