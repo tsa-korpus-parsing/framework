@@ -572,5 +572,11 @@ def download_xlsx():
     return response
 
 
+@app.route('/help_dialogue')
+@app.route('/docs/help_dialogue')
+def help_dialogue():
+    return render_template('modals/help_dialogue_ru.html')
+
+
 if __name__ == "__main__":
     app.run(debug=True)
